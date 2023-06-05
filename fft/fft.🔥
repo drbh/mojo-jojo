@@ -1,0 +1,116 @@
+from List import VariadicList
+from Pointer import DTypePointer, Pointer
+from DType import DType
+from Memory import memset_zero
+from Math import log2, exp
+
+# Matrix struct from getting started
+# https://docs.modular.com/mojo/notebooks/Matmul.html#adding-types-to-the-python-implementation
+struct Matrix:
+    var data: DTypePointer[DType.f32]
+    var rows: Int
+    var cols: Int
+
+    fn __init__(inout self, rows: Int, cols: Int):
+        self.data = DTypePointer[DType.f32].alloc(rows * cols)
+        self.rows = rows
+        self.cols = cols
+
+    fn __del__(owned self):
+        self.data.free()
+
+    fn zero(inout self):
+        memset_zero(self.data, self.rows * self.cols)
+
+    @always_inline
+    fn __getitem__(self, y: Int, x: Int) -> F32:
+        return self.load[1](y, x)
+
+    @always_inline
+    fn load[nelts:Int](self, y: Int, x: Int) -> SIMD[DType.f32, nelts]:
+        return self.data.simd_load[nelts](y * self.cols + x)
+
+    @always_inline
+    fn __setitem__(self, y: Int, x: Int, val: F32):
+        return self.store[1](y, x, val)
+
+    @always_inline
+    fn store[nelts:Int](self, y: Int, x: Int, val: SIMD[DType.f32, nelts]):
+        self.data.simd_store[nelts](y * self.cols + x, val)
+
+# function to reverse bits of a number
+fn bit_reverse(x: Int, log2n: Int) -> Int:
+        var n = 0
+        var _x = x
+        let mask = 0x1
+        for i in range(log2n):
+            n <<= 1
+            n |= (_x & 1)
+            _x >>= 1
+        return n
+
+fn fft(inout a: Matrix):
+    let n = a.cols
+    
+    # TODO: 
+    # fix: log2[1, DType.f16](n)
+    # not working since the result is not integral
+    # ie. print(DType.f16.is_integral()) => False
+    let log2n = 3 
+
+    let a2 = Matrix(1, n)
+    
+    for i in range(n):
+        let rev = bit_reverse(i, 3)
+        a2[0, rev] = a[0, i]
+        
+    # In place cooley turkey FFT
+    let im = 1 # TODO: fix im to be complex
+    for s in range(log2n + 1):
+        let m = 1 << s # 2 power s
+        let half_m = m >> 1 # m/2
+        
+        # Pre-compute twiddle factors
+        let w = Matrix(0, half_m)
+        for j in range(half_m):
+            # TODO:  use builtin PI
+            let theta = -2.0 * 3.14 * j / m
+            # TODO: this is not computed correctly because
+            # `im` is not complex
+            w[0, j] = exp[1, DType.f32](im * theta)
+        
+        var k = 0
+        while k < n:
+            for j in range(half_m):
+                let t = w[0, j] * a2[0, k + j + half_m]
+                let u = a2[0, k +j]
+                a2[0, k + j] = u + t
+                a2[0, k + j + half_m] = u - t
+            k+=m
+
+    for i in range(n):
+        print(a2[0, i])
+    
+let M = 1
+let N = 8
+
+var A = Matrix(M, N)
+for i in range(N):
+    A[0,i] = i+1
+    
+fft(A) 
+# 36.0
+# -7.0362329483032227
+# -4.8321805000305176
+# -3.4684247970581055
+# -4.0
+# -2.6281278133392334
+# -3.1678192615509033
+# -2.8672137260437012
+
+# import numpy as np
+# a = np.array([1,2,3,4,5,6,7,8])
+# np.fft.fft(a)
+# array([36.+0.j        , -4.+9.65685425j, -4.+4.j        , -4.+1.65685425j,
+#        -4.+0.j        , -4.-1.65685425j, -4.-4.j        , -4.-9.65685425j])
+
